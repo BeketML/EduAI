@@ -19,11 +19,9 @@ Services:
 
 Data and infrastructure:
 - PostgreSQL (transactional metadata)
-- Redis (caching)
 - Qdrant (vector embeddings / semantic retrieval)
 - MinIO (object storage)
-- Kafka (indexing async flow)
-- RabbitMQ (RAG agent invocation flow)
+- Kafka (indexing async flow only; RAG is synchronous in AI Service)
 
 ## Access Model
 - authenticated users can read existing content and use own AI chat interactions
@@ -64,7 +62,7 @@ Main tables:
 - Architecture Vision: `documents/AVD.md`
 - Scope of Work: `documents/SOW.md`
 - Business Requirements: `documents/BRD.md`
-- Project Overview: `documents/pm_project_overview.md`
+- Project Overview: `documents/project_overview.md`
 - ERD image: `documents/ERD.drawio.png`
 
 ## Current Repository State

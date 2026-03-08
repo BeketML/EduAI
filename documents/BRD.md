@@ -103,8 +103,8 @@ Students and learners often receive lecture materials in scattered formats (PDF/
 
 ### 2.5. Dependencies (Зависимости)
 2.5.1. Architecture and API contract alignment across services.
-2.5.2. Availability of PostgreSQL, Redis, Qdrant, MinIO.
-2.5.3. Availability of Kafka and RabbitMQ for async workflows.
+2.5.2. Availability of PostgreSQL, Qdrant, MinIO.
+2.5.3. Availability of Kafka for async indexing workflows.
 2.5.4. CI/CD and environment readiness (`stage`, `prod`).
 
 ## 3. Business Process Overview (Обзор бизнес-процессов)
@@ -151,9 +151,7 @@ flowchart LR
   content --> pg[(PostgreSQL)]
   content --> minio[(MinIO)]
   ai --> qdrant[(Qdrant)]
-  ai --> redis[(Redis)]
   ai --> kafka[(Kafka)]
-  ai --> rabbit[(RabbitMQ)]
 ```
 
 ## 6. Glossary of Terms (Глоссарий терминов)

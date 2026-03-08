@@ -4,16 +4,16 @@ AI-Powered Educational Platform for Lectures, Summaries, and Quizzes
 Education Technology (EdTech), AI Systems, and Enterprise Software
 3. Problem Statement
 Users often have access to lecture files, but they lack tools for structured learning, fast
-revision, and interactive understanding.Educational content is usually scattered across
-formats (PDF, audio, notes), making it hard to search and study efficiently.Manual creation of
-summaries and quizzes is time-consuming for content teams and learners.This results in
+revision, and interactive understanding. Educational content is usually scattered across
+formats (PDF, audio, notes), making it hard to search and study efficiently. Manual creation of
+summaries and quizzes is time-consuming for content teams and learners. This results in
 lower learning efficiency and reduced engagement.
 4. Proposed Solution
 We propose a distributed microservice-based educational platform where users can upload
 lecture files (PDF/audio), view lecture content, and receive AI-generated summaries and
-quizzes.The system includes secure authentication, lecture content management, AI
+quizzes. The system includes secure authentication, lecture content management, AI
 processing (text extraction, embeddings, RAG chat), and a user-friendly frontend
-dashboard.This approach reduces study time, improves comprehension, and provides
+dashboard. This approach reduces study time, improves comprehension, and provides
 personalized learning support.
 5. Target Users
 · Users (`user` role): read existing lectures, use RAG chat, consume summaries/quizzes
@@ -21,10 +21,10 @@ personalized learning support.
 6. Technology Stack
 Frontend: React (or Next.js), TypeScript, HTML/CSS
 Backend:
-· Service 1: Auth & Users (Go)
-· Service 2: Content & Business Logic (FastAPI)
-· Service 3: AI Service (FastAPI, NLP pipeline)
-Database: PostgreSQL (metadata, users, quiz results), Redis (cache), Vector DB (Qdrant)
+· auth-service (Go)
+· content-service (FastAPI)
+· ai-service (FastAPI, NLP pipeline)
+Database: PostgreSQL (metadata, users, quiz results), Vector DB (Qdrant), Kafka (async indexing), MinIO (S3-compatible storage)
 Cloud / Hosting: AWS (EC2/ECS/EKS), S3-compatible object storage, HTTPS-enabled
 deployment
 APIs / Integrations: JWT auth, AI model APIs (LLM/STT), internal service-to-service
@@ -34,11 +34,11 @@ monitoring (Prometheus/Grafana)
 7. Key Features
 · User registration/login with JWT (access + refresh) and profile statistics
 · Access control for read-only users and restricted operator actions
-·Lecture upload, storage, metadata management, and download
+· Lecture upload, storage, metadata management, and download
 · AI-generated lecture summaries and quiz generation
-·RAG-based lecture chat with source-referenced answers
+· RAG-based lecture chat with source-referenced answers
 8. Team Members (with Email IDs)
-· [Aibar] – Backend Developer (Auth & Users) – [230103299@sdu.edu.kz]
+· [Aibar] – Full Stack Developer (Auth & UI, Next.js) – [230103299@sdu.edu.kz]
 · [Dimash] – Backend Developer (Content & Business Logic) –
 [2301033789@sdu.edu.kz]
 · [Beket] – AI Engineer (AI Service & Data Processing) –

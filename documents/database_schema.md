@@ -128,3 +128,11 @@ CREATE INDEX idx_messages_chat_id_created_date ON messages(chat_id, created_date
 - Ownership check:
   - content write actions are restricted to trusted platform operators.
   - chat/message actions for regular users are allowed only when `chats.user_id = token.user_id`.
+
+---
+
+## 5) Quiz storage (future or out of scope)
+
+- The current schema does not define a dedicated table for quiz results or generated quizzes.
+- Other documents (AVD, BRD, system_architecture) mention "quiz records" in PostgreSQL; this may refer to a future table or to quiz payloads returned by the API without persistent storage in MVP.
+- If persistent quiz results are required, a separate table (e.g. `quizzes` or `quiz_results`) can be added to PostgreSQL; otherwise quiz data can remain API-only for the pilot.

@@ -5,7 +5,7 @@
 
 ## 1. Project Overview and Context
 - This Scope of Work (SOW) defines the technical implementation scope for the pilot `Digital Clinical Protocols with AI Support` on Freedom Cloud for the Ministry of Health.
-- The SOW is based on the target architecture and service boundaries documented in `AVD.md` and the project baseline in `pm_project_overview.md`.
+- The SOW is based on the target architecture and service boundaries documented in `AVD.md` and the project baseline in `project_overview.md`.
 - The pilot uses a microservices architecture:
   - `auth-service` (Go)
   - `content-service` (FastAPI)
@@ -61,7 +61,6 @@
 
 ### 3.3 Data and Storage Scope
 - PostgreSQL: users, content metadata, quiz records.
-- Redis: caching and latency optimization.
 - Qdrant: vector embeddings and semantic retrieval index.
 - S3-compatible storage: source documents and generated artifacts.
 
@@ -171,7 +170,7 @@
 ## 10. Integration and Data Requirements
 ### 10.1 Internal Service Integration
 - `frontend` -> `auth-service`, `content-service`, `ai-service` via `/api/v1`.
-- `ai-service` -> Qdrant, Redis, object storage, and metadata store.
+- `ai-service` -> Qdrant, Kafka (for indexing), object storage, and metadata store.
 - `content-service` -> object storage and PostgreSQL (`lectures` and related metadata).
 
 ### 10.2 Data Requirements
@@ -268,5 +267,5 @@
 ### 18.1 Reference Technical Stack
 - Frontend: React/Next.js, TypeScript.
 - Services: Go + FastAPI.
-- Data: PostgreSQL, Redis, Qdrant, object storage.
+- Data: PostgreSQL, Qdrant, Kafka (indexing), MinIO (S3-compatible object storage).
 - Platform: containerized deployment on AWS-compatible topology.
