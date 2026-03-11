@@ -16,14 +16,14 @@
 - Beket Nurzhanov
 
 ## Objective
-- Develop and present an AI-powered educational platform version with multilingual support, analytics, data protection, and scalable microservices architecture for lecture-based learning.
+- Develop and present an AI-powered educational platform version with multilingual support, analytics, data protection, and a scalable two-service architecture (frontend + modular backend) for lecture-based learning.
 
 ## Status
 - In Progress
 
 ## Execution Summary
 - The platform provides secure lecture management, AI-powered summaries and quizzes, and RAG-based chat over lecture data.
-- Architecture is designed as microservices: `auth-service` (Go), `content-service` (FastAPI), `ai-service` (FastAPI), and `frontend` (React/Next.js).
+- Architecture is designed as two deployable services: `frontend` (React/Next.js) and a single `backend` application that contains internal modules for auth, content, AI, and indexing/background jobs.
 - Core data layer combines PostgreSQL, MinIO object storage, vector DB (Qdrant), and Kafka (for indexing only) to support transactional, semantic, and async indexing workloads.
 - Deployment targets AWS with HTTPS-first networking, observability, and CI/CD automation.
 
@@ -33,8 +33,8 @@
 - The platform addresses fragmented study materials and low learning efficiency by centralizing content and automating learning artifacts.
 
 ## Key Decisions
-- Microservices over monolith for domain isolation and independent scaling.
-- AI capabilities are provided through a dedicated AI service to decouple business logic from model orchestration.
+- Modular backend over multiple deployable microservices: one backend service with clear domain modules (auth, content, AI, indexing) to simplify deployment while keeping boundaries for future scaling.
+- AI capabilities are provided through a dedicated AI module inside the backend to decouple business logic from model orchestration at the code level.
 - JWT-based authentication with access/refresh token model.
 - Vector retrieval via Qdrant for RAG context selection.
 - MinIO is used as object storage for lecture files and generated artifacts.
@@ -121,26 +121,22 @@ flowchart LR
   user[User] -->|"Uses web app"| frontend[Frontend Web App]
   operator[PlatformOperator] -->|"Manages content"| frontend
   frontend -->|"HTTPS API calls"| apiGateway[API Gateway ALB]
-  apiGateway --> authService[AuthService]
-  apiGateway --> contentService[ContentService]
-  apiGateway --> aiService[AiService]
-  contentService --> objectStorage[MinIO ObjectStorage]
-  contentService --> postgres[(PostgreSQL)]
-  aiService --> qdrant[(Qdrant VectorDB)]
-  aiService --> llmProvider[LLMProvider]
-  aiService --> kafka[(Kafka)]
+  apiGateway --> backendService[BackendService]
+  backendService --> objectStorage[MinIO ObjectStorage]
+  backendService --> postgres[(PostgreSQL)]
+  backendService --> qdrant[(Qdrant VectorDB)]
+  backendService --> llmProvider[LLMProvider]
+  backendService --> kafka[(Kafka for indexing)]
 ```
 
 ### Container View
 - `frontend` (React/Next.js):
   - UI routing, auth token handling, lecture/AI workflows.
-- `auth-service` (Go):
-  - registration, login, refresh, logout, identity and role claims.
-- `content-service` (FastAPI):
-  - lecture metadata/content CRUD, file lifecycle, lecture listing and retrieval.
-- `ai-service` (FastAPI):
-  - vector indexing, RAG orchestration, summary/quiz generation.
-  - publishes indexing tasks to Kafka; RAG chat is handled synchronously (Qdrant + LLM) within AI Service.
+- `backend`:
+  - **auth module**: registration, login, refresh, logout, identity and role claims.
+  - **content module**: lecture metadata/content CRUD, file lifecycle, lecture listing and retrieval.
+  - **ai module**: vector indexing orchestration, RAG chat, summary/quiz generation.
+  - **indexing/background jobs module**: publishes and processes indexing tasks via Kafka; RAG chat is handled synchronously (Qdrant + LLM) inside the ai module.
 - Data containers:
   - PostgreSQL for users, lecture metadata, quiz results.
   - Qdrant for embeddings and semantic retrieval.
@@ -154,9 +150,7 @@ flowchart LR
   end
 
   subgraph app [Application Tier]
-    authNode[AuthService Go]
-    contentNode[ContentService FastAPI]
-    aiNode[AiService FastAPI]
+    backendNode[Backend\n(auth, content, ai, indexing)]
   end
 
   subgraph data [Data Tier]
@@ -166,20 +160,16 @@ flowchart LR
     kafkaNode[(Kafka)]
   end
 
-  frontendNode --> authNode
-  frontendNode --> contentNode
-  frontendNode --> aiNode
-  contentNode --> pgNode
-  contentNode --> minioNode
-  aiNode --> qdrantNode
-  aiNode --> minioNode
-  aiNode --> kafkaNode
-  aiNode --> pgNode
+  frontendNode --> backendNode
+  backendNode --> pgNode
+  backendNode --> minioNode
+  backendNode --> qdrantNode
+  backendNode --> kafkaNode
 ```
 
 ### Deployment View
 - Environments: `stage` and `prod`.
-- Compute: containerized services on ECS/EKS/EC2-based orchestrated runtime.
+- Compute: two main deployable services (frontend and backend) on ECS/EKS/EC2-based orchestrated runtime.
 - Networking:
   - Public ingress via ALB/API gateway.
   - Private service/data subnets.
@@ -193,17 +183,13 @@ flowchart LR
 flowchart LR
   internet[Internet Users] --> alb[ALB API Gateway]
   alb --> feTask[Frontend Tasks]
-  alb --> authTask[AuthService Tasks]
-  alb --> contentTask[ContentService Tasks]
-  alb --> aiTask[AiService Tasks]
-  contentTask --> s3Store[(MinIO)]
-  contentTask --> pgDb[(PostgreSQL)]
-  aiTask --> qdrantDb[(Qdrant)]
-  aiTask --> kafkaBus[(Kafka)]
+  alb --> backendTask[Backend Tasks]
+  backendTask --> s3Store[(MinIO)]
+  backendTask --> pgDb[(PostgreSQL)]
+  backendTask --> qdrantDb[(Qdrant)]
+  backendTask --> kafkaBus[(Kafka)]
   feTask --> cwLogs[CloudWatch Logs]
-  authTask --> cwLogs
-  contentTask --> cwLogs
-  aiTask --> cwLogs
+  backendTask --> cwLogs
 ```
 
 ## Service API Catalog

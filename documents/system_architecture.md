@@ -23,10 +23,8 @@ flowchart TB
     alb[API Gateway / ALB\nHTTPS]
   end
 
-  subgraph services_layer ["Application Services Layer"]
-    auth_svc[Auth Service\nGo]
-    content_svc[Content Service\nFastAPI]
-    ai_svc[AI Service\nFastAPI]
+  subgraph backend_layer ["Backend Layer"]
+    backend[Backend Service\n(modular: auth, content, ai, indexing)]
   end
 
   subgraph data_layer ["Data & Storage Layer"]
@@ -37,10 +35,6 @@ flowchart TB
 
   subgraph messaging_layer ["Messaging (Indexing Only)"]
     kafka[Kafka\nIndexing Events]
-  end
-
-  subgraph workers ["Background Workers"]
-    index_worker[Indexing Worker\nconsume Kafka]
   end
 
   subgraph external ["External Integrations"]
@@ -55,27 +49,15 @@ flowchart TB
   user -->|Web usage| frontend
   operator -->|Content operations| frontend
   frontend -->|HTTPS /api/v1| alb
-  alb --> auth_svc
-  alb --> content_svc
-  alb --> ai_svc
+  alb --> backend
 
-  auth_svc -->|SQL| pg
-  content_svc -->|SQL| pg
-  content_svc -->|S3 API| minio
-  ai_svc -->|SQL| pg
-  ai_svc -->|Vector search| qdrant
-  ai_svc -->|Read/Write objects| minio
-  ai_svc -->|Publish index job| kafka
-  ai_svc -->|Generate| llm
+  backend -->|SQL| pg
+  backend -->|S3 API| minio
+  backend -->|Vector search| qdrant
+  backend -->|Publish index job| kafka
+  backend -->|Generate| llm
 
-  kafka -->|Consume| index_worker
-  index_worker -->|Write embeddings| qdrant
-  index_worker -->|Read source| minio
-
-  auth_svc -.->|Logs/Metrics| logs
-  content_svc -.->|Logs/Metrics| logs
-  ai_svc -.->|Logs/Metrics| logs
-  index_worker -.->|Logs/Metrics| logs
+  backend -.->|Logs/Metrics| logs
   logs --> metrics
 ```
 
@@ -98,10 +80,8 @@ flowchart LR
     GW[ALB / API Gateway]
   end
 
-  subgraph L4 ["Layer 4: Services"]
-    A[Auth Service]
-    C[Content Service]
-    AI[AI Service]
+  subgraph L4 ["Layer 4: Backend Service"]
+    B[Backend\n(auth, content, ai, indexing)]
   end
 
   subgraph L5 ["Layer 5: Data"]
@@ -117,16 +97,11 @@ flowchart LR
   U --> FE
   PO --> FE
   FE --> GW
-  GW --> A
-  GW --> C
-  GW --> AI
-  A --> PG
-  C --> PG
-  C --> M
-  AI --> PG
-  AI --> Q
-  AI --> M
-  AI --> K
+  GW --> B
+  B --> PG
+  B --> M
+  B --> Q
+  B --> K
 ```
 
 ---
@@ -138,9 +113,9 @@ flowchart LR
 ```
 User -> Frontend (login form)
   -> API Gateway (POST /api/v1/auth/login)
-  -> Auth Service
+  -> Backend (auth module)
   -> PostgreSQL (validate user, session)
-  -> Auth Service (issue JWT access + refresh)
+  -> Backend (auth module, issue JWT access + refresh)
   -> Frontend (store tokens, redirect)
 ```
 
@@ -149,10 +124,10 @@ User -> Frontend (login form)
 ```
 User -> Frontend (lecture list)
   -> API Gateway (GET /api/v1/lectures, Bearer token)
-  -> Auth middleware (validate JWT)
-  -> Content Service
+  -> Backend (auth module validates JWT)
+  -> Backend (content module)
   -> PostgreSQL (lectures + metadata)
-  -> Content Service (paginated response)
+  -> Backend (content module, paginated response)
   -> Frontend (render list)
 ```
 
@@ -161,11 +136,11 @@ User -> Frontend (lecture list)
 ```
 Operator -> Frontend (upload)
   -> API Gateway (POST /api/v1/lectures, Bearer token)
-  -> Auth + RBAC (operator role)
-  -> Content Service (create metadata, obtain upload link / file_key)
+  -> Backend (auth module + RBAC, operator role)
+  -> Backend (content module: create metadata, obtain upload link / file_key)
   -> PostgreSQL (insert lecture row)
   -> MinIO (store file via frontend or signed URL)
-  -> Content Service (confirm)
+  -> Backend (content module, confirm)
   -> Frontend (success)
 ```
 
@@ -174,8 +149,8 @@ Operator -> Frontend (upload)
 ```
 Operator -> Frontend (index lecture)
   -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/index)
-  -> Auth + RBAC (operator)
-  -> AI Service (publish event to Kafka, return job_id 202)
+  -> Backend (auth module + RBAC, operator)
+  -> Backend (ai/indexing module publishes event to Kafka, return job_id 202)
   -> Kafka (topic)
   -> Indexing Worker (consume)
   -> MinIO (read lecture file)
@@ -191,10 +166,10 @@ Operator -> Frontend (index lecture)
 User -> Frontend (send message)
   -> API Gateway (POST /api/v1/ai/chat/rag, Bearer token)
   -> Auth (validate JWT)
-  -> AI Service (synchronous: retrieve context from Qdrant, call LLM, build response)
+  -> Backend (ai module, synchronous: retrieve context from Qdrant, call LLM, build response)
   -> Qdrant (semantic search for context)
   -> LLM Provider (generate answer with context)
-  -> AI Service (persist message, return response)
+  -> Backend (ai module, persist message, return response)
   -> PostgreSQL (messages insert)
   -> Frontend (display answer + source_documents)
 ```
@@ -204,10 +179,10 @@ User -> Frontend (send message)
 ```
 Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizzes)
   -> Auth + RBAC
-  -> AI Service
+  -> Backend (ai module)
   -> (optional) MinIO / Content Service (lecture content)
   -> LLM Provider (generate summary or quiz)
-  -> AI Service (return payload; quiz may be stored in PG)
+  -> Backend (ai module, return payload; quiz may be stored in PG)
   -> Frontend (display)
 ```
 
@@ -218,10 +193,7 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 | Service | Role |
 |--------|------|
 | **Frontend** | SPA/SSR UI (React/Next.js). Handles auth token storage, routing, lecture list/detail, RAG chat UI, summary/quiz views. Calls backend via `/api/v1`. |
-| **Auth Service** | Identity and token lifecycle. Register, login, refresh, logout, `/me`. Issues JWT access + refresh. Validates tokens for protected routes. Stores users and auth data in PostgreSQL. |
-| **Content Service** | Lecture domain. CRUD for lecture metadata, file_key lifecycle, list/filter lectures, get lecture content. Persists metadata in PostgreSQL; binary/artifacts in MinIO. |
-| **AI Service** | AI workflows. Triggers indexing (publishes to Kafka); handles RAG chat, summary and quiz generation synchronously. Uses Qdrant for retrieval, MinIO for artifacts, PostgreSQL for chats/messages and quiz records. Calls LLM provider for generation. |
-| **Indexing Worker** | Consumes Kafka indexing events. Reads lecture content (e.g. from MinIO), chunks, generates embeddings, writes to Qdrant. Updates job status as needed. |
+| **Backend** | Single backend application with internal modules: **auth** (identity and token lifecycle, JWT validation, RBAC), **content** (lecture CRUD, metadata, file_key lifecycle, lecture listings, MinIO integration), **ai** (RAG chat, summary/quiz generation, LLM integration, chat/message storage), **indexing** (publishes/consumes indexing jobs via Kafka, chunking and embeddings into Qdrant). |
 
 ---
 
@@ -229,22 +201,23 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 
 | Component | Type | Purpose |
 |-----------|------|---------|
-| **API Gateway / ALB** | Infrastructure | Single HTTPS entry, TLS termination, routing to auth/content/ai services. |
+| **API Gateway / ALB** | Infrastructure | Single HTTPS entry, TLS termination, routing to backend service. |
+| **Backend Service** | Application | Handles all auth, content, AI, and indexing logic behind a unified `/api/v1` API. |
 | **PostgreSQL** | SQL Database | Users, lectures metadata, chats, messages, quiz results. Source of truth for transactional data. |
 | **Qdrant** | Vector Database | Stores embeddings; semantic search for RAG context retrieval. |
 | **MinIO** | Object Storage | S3-compatible store for lecture files (PDF/audio) and generated artifacts (e.g. summaries). |
-| **Kafka** | Message Broker | Used only for indexing: ai-service publishes index jobs to a topic; Indexing Worker consumes and processes (chunk, embed, write to Qdrant). |
+| **Kafka** | Message Broker | Used only for indexing: backend indexing module publishes index jobs to a topic; background indexing logic consumes and processes (chunk, embed, write to Qdrant). |
 | **LLM Provider** | External | External AI/LLM API for text generation (summaries, quizzes, RAG answers). |
 
 ---
 
 ## 6. Assumptions Made
 
-1. **Auth middleware**: JWT validation and RBAC are applied at API Gateway or at each service; documents state "protected endpoints" and "access control middleware" but do not specify whether this is gateway-level or per-service. Diagram assumes gateway routes to services and that services or a shared middleware enforce JWT and roles.
+1. **Auth middleware**: JWT validation and RBAC are applied at the backend service (and optionally at API Gateway). Documents state "protected endpoints" and "access control middleware"; the diagrams assume the gateway routes to a single backend service, and that backend modules enforce JWT and roles.
 
-2. **Background workers**: Indexing is event-driven via Kafka; only Indexing Worker consumes from Kafka. RAG is handled synchronously by AI Service (no message broker). Indexing Worker is shown as a separate logical component; deployment may be same or separate from ai-service.
+2. **Background workers**: Indexing is event-driven via Kafka; indexing logic runs as background jobs of the backend (indexing module). RAG is handled synchronously by the backend AI module (no message broker for chat).
 
-3. **Single PostgreSQL**: Database schema describes tables for users, lectures, chats, messages. Documents do not specify separate DB instances per service; diagram assumes one PostgreSQL with logical ownership (auth: users; content: lectures; ai: chats, messages, quiz data).
+3. **Single PostgreSQL**: Database schema describes tables for users, lectures, chats, messages. There is a single PostgreSQL instance used by different backend modules (auth: users; content: lectures; ai: chats, messages, quiz data).
 
 4. **RAG**: RAG is synchronous. AI Service performs retrieval from Qdrant and LLM call directly within the request; no message broker is used for chat.
 

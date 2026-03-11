@@ -145,13 +145,11 @@ flowchart LR
   user[User] -->|Web usage| frontend[Frontend Web App]
   operator[PlatformOperator] -->|Content operations| frontend
   frontend -->|HTTPS /api/v1| gateway[API Gateway ALB]
-  gateway --> auth[Auth Service]
-  gateway --> content[Content Service]
-  gateway --> ai[Ai Service]
-  content --> pg[(PostgreSQL)]
-  content --> minio[(MinIO)]
-  ai --> qdrant[(Qdrant)]
-  ai --> kafka[(Kafka)]
+  gateway --> backend[Backend Service]
+  backend --> pg[(PostgreSQL)]
+  backend --> minio[(MinIO)]
+  backend --> qdrant[(Qdrant)]
+  backend --> kafka[(Kafka for indexing)]
 ```
 
 ## 6. Glossary of Terms (Глоссарий терминов)

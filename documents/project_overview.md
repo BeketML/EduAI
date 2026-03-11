@@ -9,21 +9,23 @@ formats (PDF, audio, notes), making it hard to search and study efficiently. Man
 summaries and quizzes is time-consuming for content teams and learners. This results in
 lower learning efficiency and reduced engagement.
 4. Proposed Solution
-We propose a distributed microservice-based educational platform where users can upload
-lecture files (PDF/audio), view lecture content, and receive AI-generated summaries and
-quizzes. The system includes secure authentication, lecture content management, AI
-processing (text extraction, embeddings, RAG chat), and a user-friendly frontend
-dashboard. This approach reduces study time, improves comprehension, and provides
-personalized learning support.
+We propose an educational platform with a two-service architecture (frontend + backend),
+where users can upload lecture files (PDF/audio), view lecture content, and receive
+AI-generated summaries and quizzes. The system includes secure authentication, lecture
+content management, AI processing (text extraction, embeddings, RAG chat), and a
+user-friendly frontend dashboard. All backend responsibilities (auth, content, AI, indexing)
+are implemented as internal modules of a single backend application. This approach
+reduces study time, improves comprehension, and provides personalized learning support.
 5. Target Users
 · Users (`user` role): read existing lectures, use RAG chat, consume summaries/quizzes
 · Platform operators: upload/manage content, run indexing, manage platform data
 6. Technology Stack
 Frontend: React (or Next.js), TypeScript, HTML/CSS
-Backend:
-· auth-service (Go)
-· content-service (FastAPI)
-· ai-service (FastAPI, NLP pipeline)
+Backend: single backend application (for example FastAPI/Go) with internal modules:
+· auth module (registration/login, JWT, profile)
+· content module (lecture metadata and storage lifecycle)
+· ai module (RAG chat, summaries, quizzes, NLP pipeline)
+· indexing/background jobs module (Kafka-based indexing)
 Database: PostgreSQL (metadata, users, quiz results), Vector DB (Qdrant), Kafka (async indexing), MinIO (S3-compatible storage)
 Cloud / Hosting: AWS (EC2/ECS/EKS), S3-compatible object storage, HTTPS-enabled
 deployment
