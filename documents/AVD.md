@@ -24,7 +24,7 @@
 ## Execution Summary
 - The platform provides secure lecture management, AI-powered summaries and quizzes, and RAG-based chat over lecture data.
 - Architecture is designed as two deployable services: `frontend` (React/Next.js) and a single `backend` application that contains internal modules for auth, content, AI, and indexing/background jobs.
-- Core data layer combines PostgreSQL, MinIO object storage, vector DB (Qdrant), and Kafka (for indexing only) to support transactional, semantic, and async indexing workloads.
+- Core data layer combines PostgreSQL, MinIO object storage, vector DB (Qdrant), and RabbitMQ (for indexing only) to support transactional, semantic, and async indexing workloads.
 - Deployment targets AWS with HTTPS-first networking, observability, and CI/CD automation.
 
 ## High-Level Description
@@ -40,7 +40,7 @@
 - MinIO is used as object storage for lecture files and generated artifacts.
 - API-first contracts between frontend and backend services.
 - Event-driven async processing for heavy AI tasks (indexing, long summaries, audio generation).
-- Kafka is used only for the indexing API event flow; RAG chat is handled synchronously by AI Service.
+- RabbitMQ is used only for the indexing API event flow; RAG chat is handled synchronously by AI Service.
 
 ## Key Risks
 - Low-quality source lecture files can reduce retrieval quality.
@@ -126,7 +126,7 @@ flowchart LR
   backendService --> postgres[(PostgreSQL)]
   backendService --> qdrant[(Qdrant VectorDB)]
   backendService --> llmProvider[LLMProvider]
-  backendService --> kafka[(Kafka for indexing)]
+  backendService --> rabbitmq[(RabbitMQ for indexing)]
 ```
 
 ### Container View
@@ -136,12 +136,12 @@ flowchart LR
   - **auth module**: registration, login, refresh, logout, identity and role claims.
   - **content module**: lecture metadata/content CRUD, file lifecycle, lecture listing and retrieval.
   - **ai module**: vector indexing orchestration, RAG chat, summary/quiz generation.
-  - **indexing/background jobs module**: publishes and processes indexing tasks via Kafka; RAG chat is handled synchronously (Qdrant + LLM) inside the ai module.
+- **indexing/background jobs module**: publishes and processes indexing tasks via RabbitMQ; RAG chat is handled synchronously (Qdrant + LLM) inside the ai module.
 - Data containers:
   - PostgreSQL for users, lecture metadata, quiz results.
   - Qdrant for embeddings and semantic retrieval.
   - MinIO object storage for uploaded lecture files and generated artifacts.
-  - Kafka for indexing pipeline events only.
+- RabbitMQ for indexing pipeline events only.
 
 ```mermaid
 flowchart LR
@@ -157,14 +157,14 @@ flowchart LR
     pgNode[(PostgreSQL)]
     qdrantNode[(Qdrant)]
     minioNode[(MinIO)]
-    kafkaNode[(Kafka)]
+    rabbitmqNode[(RabbitMQ)]
   end
 
   frontendNode --> backendNode
   backendNode --> pgNode
   backendNode --> minioNode
   backendNode --> qdrantNode
-  backendNode --> kafkaNode
+  backendNode --> rabbitmqNode
 ```
 
 ### Deployment View
@@ -187,7 +187,7 @@ flowchart LR
   backendTask --> s3Store[(MinIO)]
   backendTask --> pgDb[(PostgreSQL)]
   backendTask --> qdrantDb[(Qdrant)]
-  backendTask --> kafkaBus[(Kafka)]
+  backendTask --> rabbitmqBus[(RabbitMQ)]
   feTask --> cwLogs[CloudWatch Logs]
   backendTask --> cwLogs
 ```
@@ -391,7 +391,7 @@ flowchart LR
 
 #### `POST /api/v1/ai/lectures/{lecture_id}/index` (Upload Lecture to Vector DB)
 - Purpose: trigger ingest/chunk/embed/index pipeline for one lecture.
-- Implementation note: API publishes indexing event to Kafka; workers process and update job status.
+- Implementation note: API publishes indexing message to RabbitMQ; workers consume messages from the queue and update job status.
 - Request:
 ```json
 {
@@ -569,7 +569,7 @@ flowchart LR
 - MinIO object storage for lecture assets and generated outputs.
 
 ### Messaging and Async
-- Kafka for indexing API asynchronous event flow only; RAG is synchronous in AI Service.
+- RabbitMQ for indexing API asynchronous event flow only; RAG is synchronous in AI Service.
 
 ### Security, Observability, Reliability
 - HTTPS, JWT, RBAC, secret management.

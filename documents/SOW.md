@@ -170,7 +170,7 @@
 ## 10. Integration and Data Requirements
 ### 10.1 Internal Service Integration
 - `frontend` -> `auth-service`, `content-service`, `ai-service` via `/api/v1`.
-- `ai-service` -> Qdrant, Kafka (for indexing), object storage, and metadata store.
+- `ai-service` -> Qdrant, RabbitMQ (for indexing), object storage, and metadata store.
 - `content-service` -> object storage and PostgreSQL (`lectures` and related metadata).
 
 ### 10.2 Data Requirements
@@ -267,5 +267,5 @@
 ### 18.1 Reference Technical Stack
 - Frontend: React/Next.js, TypeScript.
 - Services: Go + FastAPI.
-- Data: PostgreSQL, Qdrant, Kafka (indexing), MinIO (S3-compatible object storage).
+- Data: PostgreSQL, Qdrant, RabbitMQ (indexing), MinIO (S3-compatible object storage).
 - Platform: containerized deployment on AWS-compatible topology.

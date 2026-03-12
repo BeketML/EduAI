@@ -34,7 +34,7 @@ flowchart TB
   end
 
   subgraph messaging_layer ["Messaging (Indexing Only)"]
-    kafka[Kafka\nIndexing Events]
+    rabbitmq[RabbitMQ\nIndexing Queues]
   end
 
   subgraph external ["External Integrations"]
@@ -54,7 +54,7 @@ flowchart TB
   backend -->|SQL| pg
   backend -->|S3 API| minio
   backend -->|Vector search| qdrant
-  backend -->|Publish index job| kafka
+  backend -->|Publish index job| rabbitmq
   backend -->|Generate| llm
 
   backend -.->|Logs/Metrics| logs
@@ -91,7 +91,7 @@ flowchart LR
   end
 
   subgraph L6 ["Layer 6: Messaging"]
-    K[Kafka]
+    R[RabbitMQ]
   end
 
   U --> FE
@@ -101,7 +101,7 @@ flowchart LR
   B --> PG
   B --> M
   B --> Q
-  B --> K
+  B --> R
 ```
 
 ---
@@ -150,9 +150,9 @@ Operator -> Frontend (upload)
 Operator -> Frontend (index lecture)
   -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/index)
   -> Backend (auth module + RBAC, operator)
-  -> Backend (ai/indexing module publishes event to Kafka, return job_id 202)
-  -> Kafka (topic)
-  -> Indexing Worker (consume)
+  -> Backend (ai/indexing module publishes message to RabbitMQ, return job_id 202)
+  -> RabbitMQ (queue)
+  -> Indexing Worker (consume message)
   -> MinIO (read lecture file)
   -> Indexing Worker (chunk, embed)
   -> Qdrant (store vectors)
@@ -193,7 +193,7 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 | Service | Role |
 |--------|------|
 | **Frontend** | SPA/SSR UI (React/Next.js). Handles auth token storage, routing, lecture list/detail, RAG chat UI, summary/quiz views. Calls backend via `/api/v1`. |
-| **Backend** | Single backend application with internal modules: **auth** (identity and token lifecycle, JWT validation, RBAC), **content** (lecture CRUD, metadata, file_key lifecycle, lecture listings, MinIO integration), **ai** (RAG chat, summary/quiz generation, LLM integration, chat/message storage), **indexing** (publishes/consumes indexing jobs via Kafka, chunking and embeddings into Qdrant). |
+| **Backend** | Single backend application with internal modules: **auth** (identity and token lifecycle, JWT validation, RBAC), **content** (lecture CRUD, metadata, file_key lifecycle, lecture listings, MinIO integration), **ai** (RAG chat, summary/quiz generation, LLM integration, chat/message storage), **indexing** (publishes/consumes indexing jobs via RabbitMQ, chunking and embeddings into Qdrant). |
 
 ---
 
@@ -206,7 +206,7 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 | **PostgreSQL** | SQL Database | Users, lectures metadata, chats, messages, quiz results. Source of truth for transactional data. |
 | **Qdrant** | Vector Database | Stores embeddings; semantic search for RAG context retrieval. |
 | **MinIO** | Object Storage | S3-compatible store for lecture files (PDF/audio) and generated artifacts (e.g. summaries). |
-| **Kafka** | Message Broker | Used only for indexing: backend indexing module publishes index jobs to a topic; background indexing logic consumes and processes (chunk, embed, write to Qdrant). |
+| **RabbitMQ** | Message Broker | Used only for indexing: backend indexing module publishes index jobs to a queue; background indexing logic consumes and processes (chunk, embed, write to Qdrant). |
 | **LLM Provider** | External | External AI/LLM API for text generation (summaries, quizzes, RAG answers). |
 
 ---
@@ -215,7 +215,7 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 
 1. **Auth middleware**: JWT validation and RBAC are applied at the backend service (and optionally at API Gateway). Documents state "protected endpoints" and "access control middleware"; the diagrams assume the gateway routes to a single backend service, and that backend modules enforce JWT and roles.
 
-2. **Background workers**: Indexing is event-driven via Kafka; indexing logic runs as background jobs of the backend (indexing module). RAG is handled synchronously by the backend AI module (no message broker for chat).
+2. **Background workers**: Indexing is event-driven via RabbitMQ; indexing logic runs as background jobs of the backend (indexing module). RAG is handled synchronously by the backend AI module (no message broker for chat).
 
 3. **Single PostgreSQL**: Database schema describes tables for users, lectures, chats, messages. There is a single PostgreSQL instance used by different backend modules (auth: users; content: lectures; ai: chats, messages, quiz data).
 
@@ -244,9 +244,9 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 | AI Service | PostgreSQL | SQL (TCP) |
 | AI Service | Qdrant | gRPC/HTTP (vector API) |
 | AI Service | MinIO | S3 API (HTTP) |
-| AI Service | Kafka | Kafka protocol (produce, indexing only) |
+| AI Service | RabbitMQ | AMQP (produce, indexing only) |
 | AI Service | LLM Provider | HTTPS (REST or vendor API) |
-| Indexing Worker | Kafka | Kafka protocol (consume) |
+| Indexing Worker | RabbitMQ | AMQP (consume) |
 | Indexing Worker | Qdrant | gRPC/HTTP |
 | Indexing Worker | MinIO | S3 API |
 | All services | Logs / Metrics | HTTP or agent (e.g. Prometheus scrape, log forwarder) |
@@ -275,11 +275,11 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
              |                  |                   |
              v                  v                   v
     +-------------+   +----------------+   +----------------+
-    |Auth Service |   |Content Service |   |   AI Service   |
-    |    (Go)     |   |   (FastAPI)     |   |   (FastAPI)    |
+   |Auth Service |   |Content Service |   |   AI Service   |
+   |    (Go)     |   |   (FastAPI)     |   |   (FastAPI)    |
     +------+------+   +--------+-------+   +--------+-------+
            |                   |                     |
-           |                   |                     +---> Kafka ----> Indexing Worker ---> Qdrant, MinIO
+           |                   |                     +---> RabbitMQ ----> Indexing Worker ---> Qdrant, MinIO
            |                   |                     |
            |                   |                     RAG: AI Service does Qdrant + LLM synchronously (no broker)
            |                   |                     |
@@ -313,7 +313,7 @@ The project is designed to run on AWS (EC2/ECS/EKS per AVD). The following mappi
 | PostgreSQL       | RDS                          |
 | MinIO            | S3 (S3-compatible)           |
 | Qdrant           | GenericDatabase (vector DB)  |
-| Kafka            | ManagedStreamingForKafka     |
+| Message Broker (RabbitMQ in MVP) | GenericMessaging (e.g. Amazon MQ / self-managed) |
 | LLM              | Bedrock (or external API)    |
 | Logs             | CloudWatch Logs              |
 

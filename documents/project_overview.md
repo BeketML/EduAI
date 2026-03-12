@@ -25,8 +25,8 @@ Backend: single backend application (for example FastAPI/Go) with internal modul
 · auth module (registration/login, JWT, profile)
 · content module (lecture metadata and storage lifecycle)
 · ai module (RAG chat, summaries, quizzes, NLP pipeline)
-· indexing/background jobs module (Kafka-based indexing)
-Database: PostgreSQL (metadata, users, quiz results), Vector DB (Qdrant), Kafka (async indexing), MinIO (S3-compatible storage)
+· indexing/background jobs module (RabbitMQ-based indexing)
+Database: PostgreSQL (metadata, users, quiz results), Vector DB (Qdrant), RabbitMQ (async indexing), MinIO (S3-compatible storage)
 Cloud / Hosting: AWS (EC2/ECS/EKS), S3-compatible object storage, HTTPS-enabled
 deployment
 APIs / Integrations: JWT auth, AI model APIs (LLM/STT), internal service-to-service

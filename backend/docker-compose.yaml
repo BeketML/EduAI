@@ -1,0 +1,77 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: eduai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eduai
+      POSTGRES_PASSWORD: eduai_password
+      POSTGRES_DB: eduai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:RELEASE.2024-01-31T20-20-33Z
+    container_name: eduai-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: eduai_minio
+      MINIO_ROOT_PASSWORD: eduai_minio_password
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.1
+    container_name: eduai-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: eduai-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: eduai
+      RABBITMQ_DEFAULT_PASS: eduai_password
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: backend.Dockerfile
+  #   container_name: eduai-backend
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_HOST: postgres
+  #     POSTGRES_PORT: 5432
+  #     POSTGRES_DB: eduai
+  #     POSTGRES_USER: eduai
+  #     POSTGRES_PASSWORD: eduai_password
+  #     MINIO_ENDPOINT: http://minio:9000
+  #     MINIO_ACCESS_KEY: eduai_minio
+  #     MINIO_SECRET_KEY: eduai_minio_password
+  #     QDRANT_URL: http://qdrant:6333
+  #     RABBITMQ_URL: amqp://eduai:eduai_password@rabbitmq:5672/
+  #   depends_on:
+  #     - postgres
+  #     - minio
+  #     - qdrant
+  #     - rabbitmq
+
+volumes:
+  postgres_data:
+  minio_data:
+  qdrant_data:
