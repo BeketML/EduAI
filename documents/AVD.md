@@ -24,23 +24,23 @@
 ## Execution Summary
 - The platform provides secure lecture management, AI-powered summaries and quizzes, and RAG-based chat over lecture data.
 - Architecture is designed as two deployable services: `frontend` (React/Next.js) and a single `backend` application that contains internal modules for auth, content, AI, and indexing/background jobs.
-- Core data layer combines PostgreSQL, MinIO object storage, vector DB (Qdrant), and RabbitMQ (for indexing only) to support transactional, semantic, and async indexing workloads.
+- Core data layer combines PostgreSQL, MinIO object storage, vector DB (Qdrant), Celery (for indexing), RabbitMQ (Celery broker), and Redis (request caching) to support transactional, semantic, and async indexing workloads.
 - Deployment targets AWS with HTTPS-first networking, observability, and CI/CD automation.
 
 ## High-Level Description
 - This project is an AI-powered educational platform that lets users upload lectures (PDF/audio), browse lecture content, chat with AI using RAG, generate summaries, and create quizzes.
-- Users consume content and AI features, while platform operators manage content lifecycle and platform operations.
+- Users consume content and AI features, and manage content lifecycle and platform operations.
 - The platform addresses fragmented study materials and low learning efficiency by centralizing content and automating learning artifacts.
 
 ## Key Decisions
-- Modular backend over multiple deployable microservices: one backend service with clear domain modules (auth, content, AI, indexing) to simplify deployment while keeping boundaries for future scaling.
+- Modular backend as a single deployable service with clear domain modules (auth, content, AI, indexing) to simplify deployment while keeping boundaries for future scaling.
 - AI capabilities are provided through a dedicated AI module inside the backend to decouple business logic from model orchestration at the code level.
 - JWT-based authentication with access/refresh token model.
 - Vector retrieval via Qdrant for RAG context selection.
 - MinIO is used as object storage for lecture files and generated artifacts.
 - API-first contracts between frontend and backend services.
 - Event-driven async processing for heavy AI tasks (indexing, long summaries, audio generation).
-- RabbitMQ is used only for the indexing API event flow; RAG chat is handled synchronously by AI Service.
+- Celery is used for the indexing API event flow with RabbitMQ as broker; Redis is used for request caching. RAG chat is handled synchronously by the backend AI module.
 
 ## Key Risks
 - Low-quality source lecture files can reduce retrieval quality.
@@ -50,7 +50,7 @@
 - Rapid usage growth can pressure vector and AI inference layers.
   - Mitigation: horizontal autoscaling and queue-based workload smoothing.
 - Data privacy risks for uploaded educational content.
-  - Mitigation: encryption in transit/at rest, strict RBAC, audit trails.
+  - Mitigation: encryption in transit/at rest, strict authenticated access checks, audit trails.
 
 ## Architectural Drivers
 
@@ -85,10 +85,9 @@
 - Attribute: all external/internal traffic is HTTPS; sensitive data is encrypted at rest.
 - Scenario: when an unauthorized token accesses lecture content, API returns `401/403`, and event is logged for audit.
 
-### RBAC (Minimal Policy)
-- Access model: authenticated users + restricted operator actions.
-- Authenticated users: read existing lecture content and use own chat interactions with AI.
-- Restricted operator actions: content upload/update/delete and AI generation triggers.
+### Access Policy (Single Role)
+- Access model: authenticated users only (`user`).
+- Authenticated users can read content, use own chat interactions with AI, and perform content/AI trigger operations.
 - Access rule: user chat access is limited to own chats.
 
 ### Performance
@@ -97,36 +96,37 @@
 
 ### Availability and Reliability
 - Attribute: service-level high availability with fault isolation.
-- Scenario: if `ai-service` pod/task fails, orchestrator replaces instance without affecting auth/content service availability.
+- Scenario: if one backend instance/task fails, orchestrator replaces the instance without affecting overall platform availability.
 
 ### Scalability
 - Attribute: horizontal scaling of stateless services.
-- Scenario: during exam periods, chatbot and quiz traffic spikes are handled by independently scaling `ai-service`.
+- Scenario: during exam periods, chatbot and quiz traffic spikes are handled by scaling backend instances and Celery workers independently.
 
 ### Usability
 - Attribute: streamlined, low-friction user workflow.
-- Scenario: a platform operator uploads a lecture, then a user reads content and starts RAG chat in a single guided flow.
+- Scenario: a user uploads a lecture, then reads content and starts RAG chat in a single guided flow.
 
 ## Solution Architectures
 
 ### System Context View
 - Actors:
   - User: consumes lecture content and AI learning outputs.
-  - Platform Operator: manages lecture content quality and platform operations.
+  - User: manages lecture content quality and platform operations.
   - External AI provider/model runtime: executes language tasks.
   - Cloud infrastructure: hosts services, storage, and monitoring stack.
 
 ```mermaid
 flowchart LR
   user[User] -->|"Uses web app"| frontend[Frontend Web App]
-  operator[PlatformOperator] -->|"Manages content"| frontend
+  user2[User] -->|"Manages content"| frontend
   frontend -->|"HTTPS API calls"| apiGateway[API Gateway ALB]
   apiGateway --> backendService[BackendService]
   backendService --> objectStorage[MinIO ObjectStorage]
   backendService --> postgres[(PostgreSQL)]
   backendService --> qdrant[(Qdrant VectorDB)]
   backendService --> llmProvider[LLMProvider]
-  backendService --> rabbitmq[(RabbitMQ for indexing)]
+  backendService --> redis[(Redis cache)]
+  backendService --> celery[(Celery indexing)]
 ```
 
 ### Container View
@@ -136,12 +136,12 @@ flowchart LR
   - **auth module**: registration, login, refresh, logout, identity and role claims.
   - **content module**: lecture metadata/content CRUD, file lifecycle, lecture listing and retrieval.
   - **ai module**: vector indexing orchestration, RAG chat, summary/quiz generation.
-- **indexing/background jobs module**: publishes and processes indexing tasks via RabbitMQ; RAG chat is handled synchronously (Qdrant + LLM) inside the ai module.
+- **indexing/background jobs module**: publishes and processes indexing tasks via Celery; RAG chat is handled synchronously (Qdrant + LLM) inside the ai module.
 - Data containers:
   - PostgreSQL for users, lecture metadata, quiz results.
   - Qdrant for embeddings and semantic retrieval.
   - MinIO object storage for uploaded lecture files and generated artifacts.
-- RabbitMQ for indexing pipeline events only.
+  - Celery for indexing; RabbitMQ as Celery broker; Redis for request caching.
 
 ```mermaid
 flowchart LR
@@ -157,14 +157,14 @@ flowchart LR
     pgNode[(PostgreSQL)]
     qdrantNode[(Qdrant)]
     minioNode[(MinIO)]
-    rabbitmqNode[(RabbitMQ)]
+    redisNode[(Redis)]
   end
 
   frontendNode --> backendNode
   backendNode --> pgNode
   backendNode --> minioNode
   backendNode --> qdrantNode
-  backendNode --> rabbitmqNode
+  backendNode --> redisNode
 ```
 
 ### Deployment View
@@ -187,7 +187,8 @@ flowchart LR
   backendTask --> s3Store[(MinIO)]
   backendTask --> pgDb[(PostgreSQL)]
   backendTask --> qdrantDb[(Qdrant)]
-  backendTask --> rabbitmqBus[(RabbitMQ)]
+  backendTask --> redisCache[(Redis Cache)]
+  backendTask --> rabbitMq[(RabbitMQ Broker)]
   feTask --> cwLogs[CloudWatch Logs]
   backendTask --> cwLogs
 ```
@@ -217,15 +218,15 @@ flowchart LR
   - `POST /api/v1/auth/logout`: authenticated
   - `GET /api/v1/auth/me`: authenticated
 - Content endpoints:
-  - `POST /api/v1/lectures`: restricted (platform operator)
-  - `PATCH /api/v1/lectures/{lecture_id}`: restricted (platform operator)
-  - `DELETE /api/v1/lectures/{lecture_id}`: restricted (platform operator)
+  - `POST /api/v1/lectures`: authenticated
+  - `PATCH /api/v1/lectures/{lecture_id}`: authenticated
+  - `DELETE /api/v1/lectures/{lecture_id}`: authenticated
   - `GET /api/v1/lectures`: authenticated (read-only)
   - `GET /api/v1/lectures/{lecture_id}/content`: authenticated (read-only)
 - AI endpoints:
-  - `POST /api/v1/ai/lectures/{lecture_id}/index`: restricted (platform operator)
-  - `POST /api/v1/ai/lectures/{lecture_id}/summaries`: restricted (platform operator)
-  - `POST /api/v1/ai/lectures/{lecture_id}/quizzes`: restricted (platform operator)
+  - `POST /api/v1/ai/lectures/{lecture_id}/index`: authenticated
+  - `POST /api/v1/ai/lectures/{lecture_id}/summaries`: authenticated
+  - `POST /api/v1/ai/lectures/{lecture_id}/quizzes`: authenticated
   - `POST /api/v1/ai/chat/rag`: authenticated
 - Ownership rule for chats:
   - `user` can access only own chats/messages (`chats.user_id == token.user_id`).
@@ -391,7 +392,7 @@ flowchart LR
 
 #### `POST /api/v1/ai/lectures/{lecture_id}/index` (Upload Lecture to Vector DB)
 - Purpose: trigger ingest/chunk/embed/index pipeline for one lecture.
-- Implementation note: API publishes indexing message to RabbitMQ; workers consume messages from the queue and update job status.
+- Implementation note: API enqueues indexing task to Celery; RabbitMQ brokers the queue; Celery workers consume tasks and update job status.
 - Request:
 ```json
 {
@@ -503,7 +504,7 @@ flowchart LR
 - API metrics: request rate, latency percentiles, error rate.
 - Service metrics: CPU, memory, restart count, queue depth.
 - AI metrics: model latency, token usage, retrieval hit quality, job durations.
-- Data metrics: DB connection saturation, cache hit rate, vector index health.
+- Data metrics: DB connection saturation, Redis cache hit rate, RabbitMQ queue depth, vector index health.
 
 ### Alerting
 - Severity-based alert policies:
@@ -555,9 +556,11 @@ flowchart LR
 - React or Next.js, TypeScript, responsive web UI, multilingual-ready frontend.
 
 ### Server Application
-- `auth-service`: Go.
-- `content-service`: FastAPI (Python).
-- `ai-service`: FastAPI (Python).
+- `backend`: single deployable application (FastAPI or Go) with internal modules:
+  - `auth` (identity and token lifecycle)
+  - `content` (lecture metadata and content lifecycle)
+  - `ai` (RAG, summaries, quizzes)
+  - `indexing` (Celery producer/worker integration)
 - REST APIs over HTTPS, JWT auth model.
 
 ### AI/ML and Search
@@ -567,12 +570,14 @@ flowchart LR
 ### Data and Storage
 - PostgreSQL for transactional data.
 - MinIO object storage for lecture assets and generated outputs.
+- Redis for request caching.
+- RabbitMQ as Celery broker.
 
 ### Messaging and Async
-- RabbitMQ for indexing API asynchronous event flow only; RAG is synchronous in AI Service.
+- Celery for indexing API asynchronous event flow; RabbitMQ as Celery broker; Redis for request caching. RAG is synchronous in the backend AI module.
 
 ### Security, Observability, Reliability
-- HTTPS, JWT, RBAC, secret management.
+- HTTPS, JWT, authenticated access checks, secret management.
 - Centralized logs, metrics dashboards, and alerting policies.
 - Container orchestration with autoscaling support.
 

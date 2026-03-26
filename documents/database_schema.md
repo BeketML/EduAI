@@ -1,23 +1,25 @@
 # Database Schema
 
 ## Goal
-DB schema for 3 services:
-- `auth-service`: users + login data
-- `content-service`: lecture metadata
-- `ai-service`: chat history per user
+DB schema for backend modules:
+- `auth` module: users + login data
+- `content` module: lecture metadata
+- `ai` module: chat history per user
+
+Redis is used elsewhere for request caching; RabbitMQ is used as Celery broker (no tables in this schema).
 
 ---
 
 ## 1) Tables
 
-### `users` (auth-service)
+### `users` (auth module)
 - `user_id` UUID (PK)
 - `email` TEXT (UNIQUE, NOT NULL)
 - `first_name` VARCHAR(255) (NOT NULL)
 - `last_name` VARCHAR(255) (NOT NULL)
 - `password_hash` VARCHAR(255) (NOT NULL)
 
-### `lectures` (content-service)
+### `lectures` (content module)
 - `lecture_id` UUID (PK)
 - `user_id` UUID (FK -> `users.user_id`, NOT NULL)
 - `lecture_title` TEXT (NOT NULL)
@@ -26,7 +28,7 @@ DB schema for 3 services:
 - `created_date` BIGINT (NOT NULL, unix timestamp)
 - `deleted` SMALLINT (NOT NULL, `0/1`)
 
-### `chats` (ai-service)
+### `chats` (ai module)
 - `chat_id` UUID (PK)
 - `user_id` UUID (FK -> `users.user_id`, NOT NULL)
 - `chat_title` TEXT (NOT NULL)
@@ -34,7 +36,7 @@ DB schema for 3 services:
 - `last_modified_date` BIGINT (NOT NULL, unix timestamp)
 - `deleted` SMALLINT (NOT NULL, `0/1`)
 
-### `messages` (ai-service)
+### `messages` (ai module)
 - `message_id` UUID (PK)
 - `chat_id` UUID (FK -> `chats.chat_id`, NOT NULL)
 - `created_date` TIMESTAMPTZ (NOT NULL)
@@ -122,12 +124,11 @@ CREATE INDEX idx_messages_chat_id_created_date ON messages(chat_id, created_date
 
 ---
 
-## 4) Authorization assumptions (minimal RBAC)
-- Authenticated users can read existing content and use own chat interactions with AI.
-- Content ingestion and content write operations are restricted to trusted platform operators.
+## 4) Authorization assumptions (single-role access)
+- Authenticated users can read/write lecture content and use own chat interactions with AI.
 - Ownership check:
-  - content write actions are restricted to trusted platform operators.
-  - chat/message actions for regular users are allowed only when `chats.user_id = token.user_id`.
+  - content write actions are available to authenticated users.
+  - chat/message actions are allowed only when `chats.user_id = token.user_id`.
 
 ---
 

@@ -1,8 +1,0 @@
-port: "8080"
-
-db:
-  username: "postgres"
-  host: "auth-db"
-  port: 5432
-  dbname: "auth_db"
-  sslmode: "disable"

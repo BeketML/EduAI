@@ -44,7 +44,7 @@ Students and learners often receive lecture materials in scattered formats (PDF/
 ### 1.2. Business Goals (Цели бизнеса)
 - Improve learning efficiency through searchable lecture content.
 - Reduce manual effort in creating summaries and quizzes.
-- Provide role-based access with clear operational boundaries.
+- Provide secure authenticated access with clear operational boundaries.
 - Deliver a pilot that can be scaled with the same architecture.
 
 ### 1.3. Key Objectives (Ключевые задачи)
@@ -86,7 +86,7 @@ Students and learners often receive lecture materials in scattered formats (PDF/
 | Product Owner / Academic Lead | Defines priorities and accepts outcomes |
 | Engineering Team | Implements backend, AI, frontend, and ops |
 | End Users (`user`) | Consume content and AI features |
-| Platform Operators | Manage content lifecycle and platform operations |
+| End Users (`user`) | Manage content lifecycle and platform operations |
 | Supervisors / Reviewers | Validate quality, scope, and delivery evidence |
 
 ### 2.3. Business Constraints (Бизнес-ограничения)
@@ -103,8 +103,8 @@ Students and learners often receive lecture materials in scattered formats (PDF/
 
 ### 2.5. Dependencies (Зависимости)
 2.5.1. Architecture and API contract alignment across services.
-2.5.2. Availability of PostgreSQL, Qdrant, MinIO.
-2.5.3. Availability of RabbitMQ for async indexing workflows.
+2.5.2. Availability of PostgreSQL, Qdrant, MinIO, Redis (request caching), and RabbitMQ (Celery broker).
+2.5.3. Availability of Celery workers with RabbitMQ broker for async indexing workflows.
 2.5.4. CI/CD and environment readiness (`stage`, `prod`).
 
 ## 3. Business Process Overview (Обзор бизнес-процессов)
@@ -116,11 +116,11 @@ Students and learners often receive lecture materials in scattered formats (PDF/
 3.1.4. AI-assisted Q&A is unavailable or inconsistent.
 
 ### 3.2. To-Be Process (Будущее состояние)
-3.2.1. Platform operator uploads and manages lecture materials in centralized storage.
+3.2.1. Authenticated user uploads and manages lecture materials in centralized storage.
 3.2.2. Users browse and read lecture content through a unified interface.
 3.2.3. AI service indexes lecture content into vector store.
 3.2.4. Users ask questions in chat and receive grounded answers with sources.
-3.2.5. Platform operator triggers summary/quiz generation for lecture materials.
+3.2.5. Authenticated user triggers summary/quiz generation for lecture materials.
 
 ## 4. Stakeholder Requirements (Требования стейкхолдеров)
 
@@ -129,27 +129,29 @@ SR1. The system must allow users to register, log in, and maintain sessions secu
 SR2. The system must allow users to browse and read existing lecture content.
 SR3. The system must allow users to chat with AI and receive source-grounded answers.
 SR4. The system must allow users to access generated summaries and quizzes.
-SR5. The system must restrict users from creating/updating/deleting lecture content.
+SR5. The system allows authenticated users to create/update/delete lecture content.
 
-### 4.2. Platform Operators
-SR6. The system must allow platform operators to upload, update, and delete lecture content.
-SR7. The system must allow platform operators to trigger indexing, summary, and quiz generation.
-SR8. The system must provide platform operators with access to operational status and logs.
-SR9. The system must enforce role-based permissions on all protected endpoints.
-SR10. The system must preserve data integrity and auditability for privileged actions.
+### 4.2. Authenticated Users
+SR6. The system must allow authenticated users to upload, update, and delete lecture content.
+SR7. The system must allow authenticated users to trigger indexing, summary, and quiz generation.
+SR8. The system must provide authenticated users with access to operational status and logs.
+SR9. The system must enforce authentication checks on all protected endpoints.
+SR10. The system must preserve data integrity and auditability for sensitive actions.
 
 ## 5. Context Diagram (Контекстная диаграмма)
 
 ```mermaid
 flowchart LR
   user[User] -->|Web usage| frontend[Frontend Web App]
-  operator[PlatformOperator] -->|Content operations| frontend
+  user2[User] -->|Content operations| frontend
   frontend -->|HTTPS /api/v1| gateway[API Gateway ALB]
   gateway --> backend[Backend Service]
   backend --> pg[(PostgreSQL)]
   backend --> minio[(MinIO)]
   backend --> qdrant[(Qdrant)]
-  backend --> rabbitmq[(RabbitMQ for indexing)]
+  backend --> redis[(Redis request cache)]
+  backend --> celery[(Celery indexing)]
+  celery --> rabbitmq[(RabbitMQ broker)]
 ```
 
 ## 6. Glossary of Terms (Глоссарий терминов)
@@ -166,5 +168,5 @@ S3-compatible object storage used for source lecture files and generated artifac
 6.4. JWT  
 Token format used for stateless authentication and authorization.
 
-6.5. RBAC  
-Access control model that separates regular users from restricted platform operations.
+6.5. Access Control  
+Authentication and ownership-based authorization for protected operations.

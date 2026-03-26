@@ -12,7 +12,7 @@ This document provides a production-level system architecture view of the AI-Pow
 flowchart TB
   subgraph actors ["External Actors"]
     user[User]
-    operator[Platform Operator]
+    user2[User]
   end
 
   subgraph frontend_layer ["Frontend Layer"]
@@ -31,10 +31,12 @@ flowchart TB
     pg[(PostgreSQL\nusers, lectures, chats,\nmessages, quiz records)]
     qdrant[(Qdrant\nVector DB / Embeddings)]
     minio[(MinIO\nS3-compatible Object Storage)]
+    redis[(Redis\nRequest cache)]
+    rabbitmq[(RabbitMQ\nCelery broker)]
   end
 
-  subgraph messaging_layer ["Messaging (Indexing Only)"]
-    rabbitmq[RabbitMQ\nIndexing Queues]
+  subgraph messaging_layer ["Background / Cache"]
+    celery[Celery\nIndexing Workers]
   end
 
   subgraph external ["External Integrations"]
@@ -47,14 +49,16 @@ flowchart TB
   end
 
   user -->|Web usage| frontend
-  operator -->|Content operations| frontend
+  user2 -->|Content operations| frontend
   frontend -->|HTTPS /api/v1| alb
   alb --> backend
 
   backend -->|SQL| pg
   backend -->|S3 API| minio
   backend -->|Vector search| qdrant
-  backend -->|Publish index job| rabbitmq
+  backend -->|Cache| redis
+  backend -->|Enqueue index task| celery
+  celery -->|AMQP broker| rabbitmq
   backend -->|Generate| llm
 
   backend -.->|Logs/Metrics| logs
@@ -69,7 +73,7 @@ flowchart TB
 flowchart LR
   subgraph L1 ["Layer 1: Clients"]
     U[User]
-    PO[Platform Operator]
+    U2[User]
   end
 
   subgraph L2 ["Layer 2: Frontend"]
@@ -88,20 +92,22 @@ flowchart LR
     PG[(PostgreSQL)]
     Q[(Qdrant)]
     M[(MinIO)]
+    R[Redis]
   end
 
-  subgraph L6 ["Layer 6: Messaging"]
-    R[RabbitMQ]
+  subgraph L6 ["Layer 6: Background"]
+    C[Celery]
   end
 
   U --> FE
-  PO --> FE
+  U2 --> FE
   FE --> GW
   GW --> B
   B --> PG
   B --> M
   B --> Q
   B --> R
+  B --> C
 ```
 
 ---
@@ -131,12 +137,12 @@ User -> Frontend (lecture list)
   -> Frontend (render list)
 ```
 
-### 3.3 Upload Lecture (Platform Operator)
+### 3.3 Upload Lecture (User)
 
 ```
-Operator -> Frontend (upload)
+User -> Frontend (upload)
   -> API Gateway (POST /api/v1/lectures, Bearer token)
-  -> Backend (auth module + RBAC, operator role)
+  -> Backend (auth module + auth check)
   -> Backend (content module: create metadata, obtain upload link / file_key)
   -> PostgreSQL (insert lecture row)
   -> MinIO (store file via frontend or signed URL)
@@ -144,17 +150,17 @@ Operator -> Frontend (upload)
   -> Frontend (success)
 ```
 
-### 3.4 Trigger Indexing (Platform Operator)
+### 3.4 Trigger Indexing (User)
 
 ```
-Operator -> Frontend (index lecture)
+User -> Frontend (index lecture)
   -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/index)
-  -> Backend (auth module + RBAC, operator)
-  -> Backend (ai/indexing module publishes message to RabbitMQ, return job_id 202)
-  -> RabbitMQ (queue)
-  -> Indexing Worker (consume message)
+  -> Backend (auth module + auth check)
+  -> Backend (ai/indexing module enqueues task to Celery, return job_id 202)
+  -> Celery (queue, broker RabbitMQ)
+  -> Celery worker (consumes task)
   -> MinIO (read lecture file)
-  -> Indexing Worker (chunk, embed)
+  -> Celery worker (chunk, embed)
   -> Qdrant (store vectors)
   -> (optional) PostgreSQL (job status)
   -> Frontend (poll job status or webhook)
@@ -174,11 +180,11 @@ User -> Frontend (send message)
   -> Frontend (display answer + source_documents)
 ```
 
-### 3.6 Summary / Quiz Generation (Operator or User)
+### 3.6 Summary / Quiz Generation (User)
 
 ```
 Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizzes)
-  -> Auth + RBAC
+  -> Auth check
   -> Backend (ai module)
   -> (optional) MinIO / Content Service (lecture content)
   -> LLM Provider (generate summary or quiz)
@@ -193,7 +199,7 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 | Service | Role |
 |--------|------|
 | **Frontend** | SPA/SSR UI (React/Next.js). Handles auth token storage, routing, lecture list/detail, RAG chat UI, summary/quiz views. Calls backend via `/api/v1`. |
-| **Backend** | Single backend application with internal modules: **auth** (identity and token lifecycle, JWT validation, RBAC), **content** (lecture CRUD, metadata, file_key lifecycle, lecture listings, MinIO integration), **ai** (RAG chat, summary/quiz generation, LLM integration, chat/message storage), **indexing** (publishes/consumes indexing jobs via RabbitMQ, chunking and embeddings into Qdrant). |
+| **Backend** | Single backend application with internal modules: **auth** (identity and token lifecycle, JWT validation, authentication checks), **content** (lecture CRUD, metadata, file_key lifecycle, lecture listings, MinIO integration), **ai** (RAG chat, summary/quiz generation, LLM integration, chat/message storage), **indexing** (publishes/consumes indexing jobs via Celery, chunking and embeddings into Qdrant). |
 
 ---
 
@@ -206,16 +212,18 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 | **PostgreSQL** | SQL Database | Users, lectures metadata, chats, messages, quiz results. Source of truth for transactional data. |
 | **Qdrant** | Vector Database | Stores embeddings; semantic search for RAG context retrieval. |
 | **MinIO** | Object Storage | S3-compatible store for lecture files (PDF/audio) and generated artifacts (e.g. summaries). |
-| **RabbitMQ** | Message Broker | Used only for indexing: backend indexing module publishes index jobs to a queue; background indexing logic consumes and processes (chunk, embed, write to Qdrant). |
+| **Redis** | Cache | Request caching. |
+| **RabbitMQ** | Message Broker | Broker for Celery task delivery and queue routing. |
+| **Celery** | Task queue | Indexing: backend enqueues index jobs; Celery workers consume, chunk, embed, write to Qdrant. |
 | **LLM Provider** | External | External AI/LLM API for text generation (summaries, quizzes, RAG answers). |
 
 ---
 
 ## 6. Assumptions Made
 
-1. **Auth middleware**: JWT validation and RBAC are applied at the backend service (and optionally at API Gateway). Documents state "protected endpoints" and "access control middleware"; the diagrams assume the gateway routes to a single backend service, and that backend modules enforce JWT and roles.
+1. **Auth middleware**: JWT validation and authentication checks are applied at the backend service (and optionally at API Gateway). Documents state "protected endpoints" and "access control middleware"; the diagrams assume the gateway routes to a single backend service.
 
-2. **Background workers**: Indexing is event-driven via RabbitMQ; indexing logic runs as background jobs of the backend (indexing module). RAG is handled synchronously by the backend AI module (no message broker for chat).
+2. **Background workers**: Indexing is event-driven via Celery (RabbitMQ as broker); indexing logic runs as Celery workers. RAG is handled synchronously by the backend AI module (no message broker for chat).
 
 3. **Single PostgreSQL**: Database schema describes tables for users, lectures, chats, messages. There is a single PostgreSQL instance used by different backend modules (auth: users; content: lectures; ai: chats, messages, quiz data).
 
@@ -233,22 +241,19 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 
 | From | To | Protocol / Mechanism |
 |------|-----|------------------------|
-| User / Operator | Frontend | HTTPS (browser) |
+| User | Frontend | HTTPS (browser) |
 | Frontend | API Gateway | HTTPS, REST /api/v1 |
-| API Gateway | Auth Service | HTTP/HTTPS (internal) |
-| API Gateway | Content Service | HTTP/HTTPS (internal) |
-| API Gateway | AI Service | HTTP/HTTPS (internal) |
-| Auth Service | PostgreSQL | SQL (TCP) |
-| Content Service | PostgreSQL | SQL (TCP) |
-| Content Service | MinIO | S3 API (HTTP) |
-| AI Service | PostgreSQL | SQL (TCP) |
-| AI Service | Qdrant | gRPC/HTTP (vector API) |
-| AI Service | MinIO | S3 API (HTTP) |
-| AI Service | RabbitMQ | AMQP (produce, indexing only) |
-| AI Service | LLM Provider | HTTPS (REST or vendor API) |
-| Indexing Worker | RabbitMQ | AMQP (consume) |
-| Indexing Worker | Qdrant | gRPC/HTTP |
-| Indexing Worker | MinIO | S3 API |
+| API Gateway | Backend Service | HTTP/HTTPS (internal) |
+| Backend Service | PostgreSQL | SQL (TCP) |
+| Backend Service | MinIO | S3 API (HTTP) |
+| Backend Service | Qdrant | gRPC/HTTP (vector API) |
+| Backend | Redis | Redis protocol (cache) |
+| Backend | Celery | Enqueue task |
+| Celery | RabbitMQ | AMQP publish/consume |
+| Backend Service | LLM Provider | HTTPS (REST or vendor API) |
+| Celery Worker | RabbitMQ | AMQP consume task |
+| Celery Worker | Qdrant | gRPC/HTTP |
+| Celery Worker | MinIO | S3 API |
 | All services | Logs / Metrics | HTTP or agent (e.g. Prometheus scrape, log forwarder) |
 
 ---
@@ -258,11 +263,11 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
 ```
                     EXTERNAL ACTORS
     +------------------+              +------------------+
-    |      User        |              | Platform Operator |
-    +--------+---------+              +--------+---------+
-             |                                  |
-             | HTTPS (web)                      | HTTPS (web)
-             v                                  v
+    |                 User                       |
+    +-------------------+------------------------+
+                        |
+                        | HTTPS (web)
+                        v
     +----------------------------------------------+
     |         Frontend (React/Next.js, TS)          |
     +----------------------------------------------+
@@ -275,15 +280,15 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
              |                  |                   |
              v                  v                   v
     +-------------+   +----------------+   +----------------+
-   |Auth Service |   |Content Service |   |   AI Service   |
-   |    (Go)     |   |   (FastAPI)     |   |   (FastAPI)    |
-    +------+------+   +--------+-------+   +--------+-------+
-           |                   |                     |
-           |                   |                     +---> RabbitMQ ----> Indexing Worker ---> Qdrant, MinIO
-           |                   |                     |
-           |                   |                     RAG: AI Service does Qdrant + LLM synchronously (no broker)
-           |                   |                     |
-           v                   v                     v
+   |           Backend Service (modular)             |
+   |     auth, content, ai, indexing modules         |
+    +----------------------+-------------------------+
+                           |
+                           +---> Celery (broker RabbitMQ) ----> Celery Worker ---> Qdrant, MinIO
+                           |
+                           RAG: backend ai module does Qdrant + LLM synchronously (no broker)
+                           |
+                           v
     +------------+      +-----------+      +-----------------+
     | PostgreSQL |      |   MinIO   |      | Qdrant (vectors)|
     | users,     |      | S3-compat |      +-----------------+
@@ -292,10 +297,10 @@ Client -> API Gateway (POST /api/v1/ai/lectures/{lecture_id}/summaries or /quizz
     | messages   |      +-----------+             +-- Indexing Worker, AI Service (RAG sync)
     +------------+            ^
            ^                  |
-           |                  +-- Content Service, AI Service
-           +-- Auth, Content, AI Service
+           |                  +-- Backend Service
+           +-- Backend Service
 
-    EXTERNAL:  LLM Provider <-- AI Service
+    EXTERNAL:  LLM Provider <-- Backend Service
 ```
 
 ---
@@ -308,12 +313,13 @@ The project is designed to run on AWS (EC2/ECS/EKS per AVD). The following mappi
 |------------------|------------------------------|
 | API Gateway/ALB  | ALB                          |
 | Frontend         | ECS                          |
-| Auth/Content/AI  | ECS                          |
-| Indexing Worker  | ECS                          |
+| Backend service (auth/content/ai/indexing modules) | ECS |
+| Celery workers (indexing) | ECS                  |
 | PostgreSQL       | RDS                          |
 | MinIO            | S3 (S3-compatible)           |
 | Qdrant           | GenericDatabase (vector DB)  |
-| Message Broker (RabbitMQ in MVP) | GenericMessaging (e.g. Amazon MQ / self-managed) |
+| Redis (cache) | ElastiCache or self-managed Redis |
+| RabbitMQ (Celery broker) | Amazon MQ (RabbitMQ) or self-managed RabbitMQ |
 | LLM              | Bedrock (or external API)    |
 | Logs             | CloudWatch Logs              |
 
@@ -329,4 +335,4 @@ Output: `generated-diagrams/eduai-aws-architecture.png`. The script is [scripts/
 
 ---
 
-This document and the diagrams above summarize the system architecture as a production-style microservices design with clear layers, data flows, and communication patterns derived from the project documentation.
+This document and the diagrams above summarize the system architecture as a production-style modular backend design with clear layers, data flows, and communication patterns derived from the project documentation.

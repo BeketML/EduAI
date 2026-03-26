@@ -6,11 +6,9 @@
 ## 1. Project Overview and Context
 - This Scope of Work (SOW) defines the technical implementation scope for the pilot `Digital Clinical Protocols with AI Support` on Freedom Cloud for the Ministry of Health.
 - The SOW is based on the target architecture and service boundaries documented in `AVD.md` and the project baseline in `project_overview.md`.
-- The pilot uses a microservices architecture:
-  - `auth-service` (Go)
-  - `content-service` (FastAPI)
-  - `ai-service` (FastAPI)
+- The pilot uses a two-service architecture:
   - `frontend` (React/Next.js, TypeScript)
+  - `backend` (single deployable application with internal modules: auth, content, ai, indexing)
 - For domain alignment, the core content entity is interpreted as:
   - `lecture` in current APIs = `clinical protocol document` in pilot business context.
 
@@ -18,7 +16,7 @@
 ### 2.1 Objectives
 - Deliver a secure and observable pilot for protocol ingestion, retrieval, and AI-assisted interactions.
 - Validate AI workflows for protocol Q&A, summarization, and quiz/assessment generation.
-- Prove technical readiness for production scaling using the same service decomposition.
+- Prove technical readiness for production scaling using the same modular backend decomposition.
 
 ### 2.2 Measurable Outcomes (Pilot KPIs)
 - Availability: >= 99.0% monthly for pilot environment runtime window.
@@ -35,9 +33,9 @@
 ## 3. In-Scope Technical Work
 ### 3.1 Service Implementation Scope
 - Implement and integrate:
-  - identity and token lifecycle APIs in `auth-service`.
-  - protocol document lifecycle APIs in `content-service`.
-  - AI indexing and generation APIs in `ai-service`.
+  - identity and token lifecycle APIs in backend `auth` module.
+  - protocol document lifecycle APIs in backend `content` module.
+  - AI indexing and generation APIs in backend `ai` module.
   - user flows in `frontend` for protocol upload, browsing, and AI actions.
 
 ### 3.2 API Scope (from AVD/API Catalog)
@@ -62,6 +60,8 @@
 ### 3.3 Data and Storage Scope
 - PostgreSQL: users, content metadata, quiz records.
 - Qdrant: vector embeddings and semantic retrieval index.
+- RabbitMQ: Celery broker for indexing tasks.
+- Redis: request caching.
 - S3-compatible storage: source documents and generated artifacts.
 
 ### 3.4 Observability and Operations Scope
@@ -78,17 +78,17 @@
 
 ## 5. Solution Architecture and Technical Design
 ### 5.1 Architecture Pattern
-- API-first microservices with separate auth/content/AI concerns.
+- API-first modular backend with separate auth/content/AI concerns.
 - Stateless service runtime with horizontal scaling capability.
 - Managed or self-hosted data components for transactional and semantic workloads.
 
 ### 5.2 Logical Flow
-1. User authenticates via `auth-service` and receives JWT tokens.
-2. Platform operator uploads protocol content via `content-service`.
-3. User accesses available lectures via `content-service`.
+1. User authenticates via backend `auth` module and receives JWT tokens.
+2. User uploads protocol content via backend `content` module.
+3. User accesses available lectures via backend `content` module.
 4. AI indexing job stores embeddings in Qdrant.
 5. User asks protocol question via RAG API.
-6. `ai-service` retrieves context from Qdrant and produces grounded answer.
+6. Backend `ai` module retrieves context from Qdrant and produces grounded answer.
 7. Optional summary/quiz outputs generated and stored.
 
 ### 5.3 Deployment Model
@@ -107,7 +107,7 @@
 ### Workstream B: Authentication and Access
 - Deliverables:
   - JWT auth flows
-  - access control middleware for protected endpoints and operator-only actions
+  - access control middleware for protected endpoints
   - session/token lifecycle APIs
 
 ### Workstream C: Content Management
@@ -169,9 +169,9 @@
 
 ## 10. Integration and Data Requirements
 ### 10.1 Internal Service Integration
-- `frontend` -> `auth-service`, `content-service`, `ai-service` via `/api/v1`.
-- `ai-service` -> Qdrant, RabbitMQ (for indexing), object storage, and metadata store.
-- `content-service` -> object storage and PostgreSQL (`lectures` and related metadata).
+- `frontend` -> `backend` via `/api/v1`.
+- `backend ai/indexing modules` -> Qdrant, Celery (for indexing), RabbitMQ (broker), Redis (request cache), object storage, and metadata store.
+- `backend content module` -> object storage and PostgreSQL (`lectures` and related metadata).
 
 ### 10.2 Data Requirements
 - Mandatory metadata fields: title, owner, language, created timestamp, version status.
@@ -181,9 +181,7 @@
 ## 11. Security, Compliance, and Risk Controls
 ### 11.1 Security Controls
 - JWT access/refresh token model with expiration and refresh rotation.
-- Access control middleware on all protected routes:
-  - restricted operator actions for content write and AI generation triggers.
-  - authenticated user access for read flows and own chat interactions.
+- Access control middleware on all protected routes for authenticated users.
 - HTTPS/TLS on all external and service communication paths.
 - Encryption at rest for object and database storage.
 - Audit logging for privileged actions and auth events.
@@ -267,5 +265,5 @@
 ### 18.1 Reference Technical Stack
 - Frontend: React/Next.js, TypeScript.
 - Services: Go + FastAPI.
-- Data: PostgreSQL, Qdrant, RabbitMQ (indexing), MinIO (S3-compatible object storage).
+- Data: PostgreSQL, Qdrant, Celery (indexing), RabbitMQ (Celery broker), Redis (request cache), MinIO (S3-compatible object storage).
 - Platform: containerized deployment on AWS-compatible topology.

@@ -18,15 +18,15 @@ are implemented as internal modules of a single backend application. This approa
 reduces study time, improves comprehension, and provides personalized learning support.
 5. Target Users
 · Users (`user` role): read existing lectures, use RAG chat, consume summaries/quizzes
-· Platform operators: upload/manage content, run indexing, manage platform data
+· Users (`user` role): upload/manage content, run indexing, manage platform data
 6. Technology Stack
 Frontend: React (or Next.js), TypeScript, HTML/CSS
 Backend: single backend application (for example FastAPI/Go) with internal modules:
 · auth module (registration/login, JWT, profile)
 · content module (lecture metadata and storage lifecycle)
 · ai module (RAG chat, summaries, quizzes, NLP pipeline)
-· indexing/background jobs module (RabbitMQ-based indexing)
-Database: PostgreSQL (metadata, users, quiz results), Vector DB (Qdrant), RabbitMQ (async indexing), MinIO (S3-compatible storage)
+· indexing/background jobs module (Celery-based indexing)
+Database: PostgreSQL (metadata, users, quiz results), Vector DB (Qdrant), RabbitMQ (Celery broker), Redis (request cache), Celery (async indexing), MinIO (S3-compatible storage)
 Cloud / Hosting: AWS (EC2/ECS/EKS), S3-compatible object storage, HTTPS-enabled
 deployment
 APIs / Integrations: JWT auth, AI model APIs (LLM/STT), internal service-to-service
@@ -35,7 +35,7 @@ Other Tools: Docker, CI/CD pipelines (GitHub Actions), centralized logging (ELK/
 monitoring (Prometheus/Grafana)
 7. Key Features
 · User registration/login with JWT (access + refresh) and profile statistics
-· Access control for read-only users and restricted operator actions
+· Access control for authenticated users
 · Lecture upload, storage, metadata management, and download
 · AI-generated lecture summaries and quiz generation
 · RAG-based lecture chat with source-referenced answers
